@@ -12,6 +12,9 @@ marksPerQuestion = 1   # each question = 1 mark
 choices = 4            # a,b,c,d
 questions = [20, 20, 20, 20, 20]   # Python, EDA, SQL, Power BI, Statistics
 
+# Thresholds to dynamically detect biggest contour
+THRESHOLDS = [200000, 150000, 100000, 50000]
+
 
 def parse_answer(ans_str):
     """Convert 'a,b,c' -> [0,1,2] and 'a' -> 0"""
@@ -21,6 +24,7 @@ def parse_answer(ans_str):
         return [mapping[x] for x in ans_str.split(",")]
     else:
         return mapping[ans_str]
+
 
 # Build full answer key (100 Qs → 5 subjects)
 raw_key = {
@@ -49,6 +53,15 @@ raw_key = {
 ans = [[parse_answer(x) for x in raw_key[sub]] for sub in raw_key]
 
 
+# Dynamic contour detection
+def get_biggest_contour(contours):
+    for t in THRESHOLDS:
+        rectCon = util.rectContours(contours, t)
+        if len(rectCon) > 0:
+            return rectCon
+    return []
+
+
 def find_marks(image, ans, questions):
     img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     img = cv2.resize(img, (widthImg, heightImg))
@@ -58,9 +71,10 @@ def find_marks(image, ans, questions):
     img1 = functions.preProcess(img)
     contours, hierarchy = functions.findContours(img1, imgContours)
 
-    rectCon = util.rectContours(contours, 200000)
+    # Dynamic contour detection
+    rectCon = get_biggest_contour(contours)
+    st.write("Contours found:", len(rectCon))  # debug info
 
-    # ✅ Safe check for empty contours
     if len(rectCon) > 0:
         biggestContour1 = util.getCornerPoints(rectCon[0])
 
@@ -87,11 +101,17 @@ def find_marks(image, ans, questions):
         else:
             return None
     else:
-        # ❌ Return None if no contours found
         return None
 
 
-st.set_page_config(page_title="OMR Sheet Evaluation System", page_icon="📝", layout="centered", initial_sidebar_state="expanded")
+# Streamlit Page Config
+st.set_page_config(
+    page_title="OMR Sheet Evaluation System",
+    page_icon="📝",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
 style.apply_styling()
 
 st.title("📝 Automated OMR Sheet Evaluation System")
@@ -101,14 +121,17 @@ uploaded_file = st.file_uploader("Choose an OMR image...", type=["jpg", "jpeg", 
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
-    st.image(image, caption='Uploaded OMR Sheet', use_column_width=True, width=300)
+    st.image(image, caption='Uploaded OMR Sheet', use_container_width=True)
 
     if st.button('Calculate Marks'):
         with st.spinner('Processing...'):
             final_image = find_marks(image, ans, questions)
             if final_image is not None:
-                st.image(final_image, caption='Graded OMR Sheet', use_column_width=True)
+                st.image(final_image, caption='Graded OMR Sheet', use_container_width=True)
             else:
-                st.error("Could not detect the OMR sheet. Please upload a clearer image.")
+                st.error(
+                    "Could not detect the OMR sheet. "
+                    "Please upload a clearer image or try a slightly different scan/angle."
+                )
 else:
     st.info("Please upload an OMR sheet image to continue.")
