@@ -6,27 +6,16 @@ import functions
 import util
 import style
 
+# Image size and marks configuration
 widthImg = 600
 heightImg = 780
-marksPerQuestion = 1   # each question = 1 mark
-choices = 4            # a,b,c,d
-questions = [20, 20, 20, 20, 20]   # Python, EDA, SQL, Power BI, Statistics
+marksPerQuestion = 1
+choices = 4
+questions = [20, 20, 20, 20, 20]  # Python, EDA, SQL, PowerBI, Statistics
+THRESHOLDS = [200000, 150000, 100000, 50000]  # for dynamic contour detection
+ANGLES = [0, 90, 180, 270]  # rotations to handle tilted sheets
 
-# Thresholds to dynamically detect biggest contour
-THRESHOLDS = [200000, 150000, 100000, 50000]
-
-
-def parse_answer(ans_str):
-    """Convert 'a,b,c' -> [0,1,2] and 'a' -> 0"""
-    mapping = {'a': 0, 'b': 1, 'c': 2, 'd': 3}
-    ans_str = ans_str.replace(" ", "").lower()
-    if "," in ans_str:
-        return [mapping[x] for x in ans_str.split(",")]
-    else:
-        return mapping[ans_str]
-
-
-# Build full answer key (100 Qs → 5 subjects)
+# Answer key
 raw_key = {
     "Python": [
         "a","c","c","c","c","a","c","c","b","c",
@@ -50,6 +39,14 @@ raw_key = {
     ]
 }
 
+def parse_answer(ans_str):
+    mapping = {'a': 0, 'b': 1, 'c': 2, 'd': 3}
+    ans_str = ans_str.replace(" ", "").lower()
+    if "," in ans_str:
+        return [mapping[x] for x in ans_str.split(",")]
+    else:
+        return mapping[ans_str]
+
 ans = [[parse_answer(x) for x in raw_key[sub]] for sub in raw_key]
 
 
@@ -68,66 +65,81 @@ def find_marks(image, ans, questions):
     imgContours = img.copy()
     imgBiggestContours = img.copy()
 
-    img1 = functions.preProcess(img)
-    contours, hierarchy = functions.findContours(img1, imgContours)
+    # Try rotated images to detect contour if tilted
+    rectCon = []
+    for angle in ANGLES:
+        rotated_img = functions.rotate_image(img, angle) if angle != 0 else img
+        img1 = functions.preProcess(rotated_img)
+        contours, _ = functions.findContours(img1, imgContours)
+        rectCon = get_biggest_contour(contours)
+        if len(rectCon) > 0:
+            img = rotated_img  # use corrected orientation
+            break
 
-    # Dynamic contour detection
-    rectCon = get_biggest_contour(contours)
-    st.write("Contours found:", len(rectCon))  # debug info
-
-    if len(rectCon) > 0:
-        biggestContour1 = util.getCornerPoints(rectCon[0])
-
-        if biggestContour1.size != 0:
-            cv2.drawContours(imgBiggestContours, biggestContour1, -1, (0, 255, 0), 20)
-            biggestContour1 = util.reorder(biggestContour1)
-
-            pt1 = np.float32(biggestContour1)
-            pt2 = np.float32([[0, 0], [widthImg, 0], [0, heightImg], [widthImg, heightImg]])
-            matrix1 = cv2.getPerspectiveTransform(pt1, pt2)
-            imgWrap = cv2.warpPerspective(img, matrix1, (widthImg, heightImg))
-
-            h, w, channels = imgWrap.shape
-            cut = (h * 60) // 100
-
-            top = imgWrap[:cut, :]
-            bottom = imgWrap[cut:, :]
-
-            finalImage = functions.upper(
-                top, bottom, imgContours,
-                questions[0], choices, questions, ans, marksPerQuestion
-            )
-            return finalImage
-        else:
-            return None
-    else:
+    st.write("Contours found:", len(rectCon))
+    if len(rectCon) == 0:
+        st.image(img, caption="Preprocessed Sheet", use_container_width=True)
         return None
 
+    biggestContour1 = util.getCornerPoints(rectCon[0])
+    if biggestContour1.size == 0:
+        return None
 
-# Streamlit Page Config
+    cv2.drawContours(imgBiggestContours, biggestContour1, -1, (0, 255, 0), 20)
+    biggestContour1 = util.reorder(biggestContour1)
+
+    pt1 = np.float32(biggestContour1)
+    pt2 = np.float32([[0, 0], [widthImg, 0], [0, heightImg], [widthImg, heightImg]])
+    matrix1 = cv2.getPerspectiveTransform(pt1, pt2)
+    imgWrap = cv2.warpPerspective(img, matrix1, (widthImg, heightImg))
+
+    h, w, _ = imgWrap.shape
+    cut = (h * 60) // 100
+    top = imgWrap[:cut, :]
+    bottom = imgWrap[cut:, :]
+
+    # functions.upper returns final graded image
+    finalImage, subject_scores = functions.upper(
+        top, bottom, imgContours,
+        questions[0], choices, questions, ans, marksPerQuestion,
+        return_scores=True  # make sure your functions.upper returns scores as well
+    )
+
+    return finalImage, subject_scores
+
+
+# Streamlit UI
 st.set_page_config(
     page_title="OMR Sheet Evaluation System",
     page_icon="📝",
     layout="centered",
     initial_sidebar_state="expanded"
 )
-
 style.apply_styling()
 
 st.title("📝 Automated OMR Sheet Evaluation System")
-st.write("Upload your OMR sheet image below and click **Calculate Marks** to get results.")
+st.write("Upload your OMR sheet image and click **Calculate Marks** to evaluate.")
 
 uploaded_file = st.file_uploader("Choose an OMR image...", type=["jpg", "jpeg", "png"])
 
-if uploaded_file is not None:
+if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption='Uploaded OMR Sheet', use_container_width=True)
 
     if st.button('Calculate Marks'):
         with st.spinner('Processing...'):
-            final_image = find_marks(image, ans, questions)
-            if final_image is not None:
+            result = find_marks(image, ans, questions)
+            if result is not None:
+                final_image, subject_scores = result
                 st.image(final_image, caption='Graded OMR Sheet', use_container_width=True)
+
+                # Display scores
+                total_score = sum(subject_scores)
+                subjects = ["Python", "EDA", "SQL", "PowerBI", "Statistics"]
+                st.write("### Score Summary:")
+                for i, sub in enumerate(subjects):
+                    st.write(f"{sub}: {subject_scores[i]}/{questions[i]}")
+                st.write(f"**Total Score: {total_score}/100**")
             else:
                 st.error(
                     "Could not detect the OMR sheet. "
