@@ -59,29 +59,35 @@ def find_marks(image, ans, questions):
     contours, hierarchy = functions.findContours(img1, imgContours)
 
     rectCon = util.rectContours(contours, 200000)
-    biggestContour1 = util.getCornerPoints(rectCon[0])
 
-    if biggestContour1.size != 0:
-        cv2.drawContours(imgBiggestContours, biggestContour1, -1, (0, 255, 0), 20)
-        biggestContour1 = util.reorder(biggestContour1)
+    # ✅ Safe check for empty contours
+    if len(rectCon) > 0:
+        biggestContour1 = util.getCornerPoints(rectCon[0])
 
-        pt1 = np.float32(biggestContour1)
-        pt2 = np.float32([[0, 0], [widthImg, 0], [0, heightImg], [widthImg, heightImg]])
-        matrix1 = cv2.getPerspectiveTransform(pt1, pt2)
-        imgWrap = cv2.warpPerspective(img, matrix1, (widthImg, heightImg))
+        if biggestContour1.size != 0:
+            cv2.drawContours(imgBiggestContours, biggestContour1, -1, (0, 255, 0), 20)
+            biggestContour1 = util.reorder(biggestContour1)
 
-        h, w, channels = imgWrap.shape
-        cut = (h * 60) // 100
+            pt1 = np.float32(biggestContour1)
+            pt2 = np.float32([[0, 0], [widthImg, 0], [0, heightImg], [widthImg, heightImg]])
+            matrix1 = cv2.getPerspectiveTransform(pt1, pt2)
+            imgWrap = cv2.warpPerspective(img, matrix1, (widthImg, heightImg))
 
-        top = imgWrap[:cut, :]
-        bottom = imgWrap[cut:, :]
+            h, w, channels = imgWrap.shape
+            cut = (h * 60) // 100
 
-        finalImage = functions.upper(
-            top, bottom, imgContours,
-            questions[0], choices, questions, ans, marksPerQuestion
-        )
-        return finalImage
+            top = imgWrap[:cut, :]
+            bottom = imgWrap[cut:, :]
+
+            finalImage = functions.upper(
+                top, bottom, imgContours,
+                questions[0], choices, questions, ans, marksPerQuestion
+            )
+            return finalImage
+        else:
+            return None
     else:
+        # ❌ Return None if no contours found
         return None
 
 
