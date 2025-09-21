@@ -98,11 +98,11 @@ def find_marks(image, ans, questions):
     top = imgWrap[:cut, :]
     bottom = imgWrap[cut:, :]
 
-    # functions.upper returns final graded image
+    # functions.upper should return final graded image + per subject scores
     finalImage, subject_scores = functions.upper(
         top, bottom, imgContours,
         questions[0], choices, questions, ans, marksPerQuestion,
-        return_scores=True  # make sure your functions.upper returns scores as well
+        return_scores=True
     )
 
     return finalImage, subject_scores
